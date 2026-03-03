@@ -205,138 +205,118 @@ audio { width: 260px; }
 </script>
 <script>
   // ===================== Prolific + Google Sheets submission wiring =====================
-	// 1) Deploy the companion Google Apps Script as a Web App and paste its URL below.
-	// 2) In Prolific, use an External Study Link that appends PROLIFIC_PID / STUDY_ID / SESSION_ID.
-	// 3) Paste your Prolific completion redirect URL below.
+  const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzG036OQcUQnDDy_h2CQ59-SLZ8ohhfpqG0BRMOqiF6GUXNVfDBxYzgpv6w_1pyXdKM/exec";
+  const PROLIFIC_COMPLETION_URL = "https://app.prolific.com/submissions/complete?cc=C6IEG2VT";
 
-	// TODO: PASTE your deployed Apps Script Web App URL (it ends with /exec)
-	const APPS_SCRIPT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzG036OQcUQnDDy_h2CQ59-SLZ8ohhfpqG0BRMOqiF6GUXNVfDBxYzgpv6w_1pyXdKM/exec";
+  function getProlificParams() {
+    const p = new URLSearchParams(window.location.search);
+    return {
+      PROLIFIC_PID: p.get("PROLIFIC_PID") || "",
+      STUDY_ID: p.get("STUDY_ID") || "",
+      SESSION_ID: p.get("SESSION_ID") || ""
+    };
+  }
 
-	// TODO: PASTE your Prolific completion redirect URL (cc=XXXXXXX)
-	const PROLIFIC_COMPLETION_URL = "https://app.prolific.com/submissions/complete?cc=C6IEG2VT";
+  function collectResponsesFromTables() {
+    const out = [];
 
-	function getProlificParams() {
-		const p = new URLSearchParams(window.location.search);
-		return {
-			PROLIFIC_PID: p.get("PROLIFIC_PID") || "",
-			STUDY_ID: p.get("STUDY_ID") || "",
-			SESSION_ID: p.get("SESSION_ID") || ""
-		};
-	}
+    // Each table has its own tbody; iterate rows across all tables
+    document.querySelectorAll("table.tests tbody tr").forEach((tr) => {
+      if (tr.querySelectorAll("th").length > 0) return; // header row
 
-	function collectResponsesFromTables() {
-		// Collect one record per question-row in table.tests.
-		// Assumptions based on your current HTML:
-		// - each question row has a <select class="... overall" name="XYZ_overall"> with values "1"/"-1"
-		// - each confidence question is a radio-group named "XYZ"
-		// - audio sources are <audio><source src="..."></audio> in the row
-		const out = [];
-		document.querySelectorAll("table.tests tbody tr").forEach((tr) => {
-			// Skip header rows (typically use <th>)
-			if (tr.querySelectorAll("th").length > 0) return;
+      const tds = tr.querySelectorAll("td");
+      if (!tds || tds.length === 0) return;
 
-			const tds = tr.querySelectorAll("td");
-			if (!tds || tds.length === 0) return;
+      const questionIdText = (tds[0]?.innerText || "").trim();
 
-			const questionIdText = (tds[0]?.innerText || "").trim();
+      const audioSrcs = Array.from(tr.querySelectorAll("audio source"))
+        .map(s => s.getAttribute("src") || "")
+        .filter(Boolean);
 
-			// try to capture first two audio sources in the row (A then B)
-			const audioSrcs = Array.from(tr.querySelectorAll("audio source"))
-				.map(s => s.getAttribute("src") || "")
-				.filter(Boolean);
+      const sel = tr.querySelector("select.overall");
+      const overallName = sel ? (sel.getAttribute("name") || "") : "";
+      const choice = sel ? (sel.value || "0") : "0";
 
-			const sel = tr.querySelector("select.overall");
-			const overallName = sel ? (sel.getAttribute("name") || "") : "";
-			const choice = sel ? (sel.value || "0") : "0";
+      const confGroupName = overallName ? overallName.replace("_overall", "") : "";
+      const checked = confGroupName
+        ? document.querySelector(`input[type="radio"][name="${confGroupName}"]:checked`)
+        : null;
 
-			const confGroupName = overallName ? overallName.replace("_overall", "") : "";
-			const checked = confGroupName
-				? document.querySelector(`input[type="radio"][name="${confGroupName}"]:checked`)
-				: null;
+      out.push({
+        question_id: questionIdText,
+        overall_name: overallName,
+        choice: choice,
+        confidence_group: confGroupName,
+        confidence: checked ? checked.value : "",
+        audio_a: audioSrcs[0] || "",
+        audio_b: audioSrcs[1] || "",
+        all_audio_in_row: audioSrcs
+      });
+    });
 
-			out.push({
-				question_id: questionIdText,
-				overall_name: overallName,
-				choice: choice, // typically "1" for A, "-1" for B (per your options)
-				confidence_group: confGroupName,
-				confidence: checked ? checked.value : "",
-				audio_a: audioSrcs[0] || "",
-				audio_b: audioSrcs[1] || "",
-				all_audio_in_row: audioSrcs
-			});
-		});
-		return out;
-	}
+    // Post-survey fields too
+    const post = {};
+    document.querySelectorAll(".post-survey").forEach(el => {
+      if (!el.name) return;
+      post[el.name] = el.value ?? "";
+    });
 
-	async function submitToGoogleSheet(payload) {
-		// Prefer sendBeacon (reliable during navigation / redirect). Falls back to fetch.
-		try {
-			const blob = new Blob([JSON.stringify(payload)], { type: "text/plain" });
-			const ok = navigator.sendBeacon(APPS_SCRIPT_WEBAPP_URL, blob);
-			if (ok) return true;
-		} catch (e) { /* ignore and fallback */ }
+    return { rows: out, post_survey: post };
+  }
 
-		// Fallback
-		const resp = await fetch(APPS_SCRIPT_WEBAPP_URL, {
-			method: "POST",
-			headers: { "Content-Type": "text/plain" },
-			body: JSON.stringify(payload),
-			keepalive: true
-		});
-		return resp.ok;
-	}
+  async function submitToGoogleSheet(payload) {
+    // Prefer sendBeacon
+    try {
+      const blob = new Blob([JSON.stringify(payload)], { type: "text/plain" });
+      const ok = navigator.sendBeacon(APPS_SCRIPT_WEBAPP_URL, blob);
+      if (ok) return true;
+    } catch (e) {}
 
-	async function submitAndRedirect() {
-		// Basic config sanity checks
-		if (!APPS_SCRIPT_WEBAPP_URL || APPS_SCRIPT_WEBAPP_URL.includes("PASTE_YOUR_APPS_SCRIPT_WEBAPP_URL_HERE")) {
-			alert("Study misconfigured: APPS_SCRIPT_WEBAPP_URL is not set. Please paste your Apps Script Web App URL into the HTML.");
-			return;
-		}
-		if (!PROLIFIC_COMPLETION_URL || PROLIFIC_COMPLETION_URL.includes("PASTE_COMPLETION_CODE_HERE")) {
-			alert("Study misconfigured: PROLIFIC_COMPLETION_URL is not set. Please paste your Prolific completion URL into the HTML.");
-			return;
-		}
+    // Fallback fetch
+    const resp = await fetch(APPS_SCRIPT_WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(payload),
+      keepalive: true
+    });
+    return resp.ok;
+  }
 
-		// Validate using your existing logic
-		if (!check_buttons()) return;
+  async function submitAndRedirect() {
+    if (!check_buttons()) return;
 
-		const btn = document.getElementById("submitButton");
-		const statusEl = document.getElementById("submitStatus");
+    const btn = document.getElementById("submitButton");
+    const statusEl = document.getElementById("submitStatus");
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = "Submitting…";
 
-		if (btn) btn.disabled = true;
-		if (statusEl) statusEl.textContent = "Submitting…";
+    const payload = {
+      prolific: getProlificParams(),
+      responses: collectResponsesFromTables(),
+      page: { url: window.location.href, referrer: document.referrer || "" },
+      ts: Date.now(),
+      user_agent: navigator.userAgent
+    };
 
-		const prolific = getProlificParams();
-		const payload = {
-			prolific: prolific,
-			responses: collectResponsesFromTables(),
-			page: { url: window.location.href, referrer: document.referrer || "" },
-			ts: Date.now(),
-			user_agent: navigator.userAgent
-		};
+    try {
+      const ok = await submitToGoogleSheet(payload);
+      if (!ok) throw new Error("Apps Script endpoint returned non-OK.");
 
-		try {
-			const ok = await submitToGoogleSheet(payload);
-			if (!ok) throw new Error("Failed to POST to Apps Script endpoint.");
+      if (statusEl) statusEl.textContent = "Submitted. Redirecting…";
+      window.location.href = PROLIFIC_COMPLETION_URL;
+    } catch (e) {
+      if (statusEl) statusEl.textContent = "Upload failed. Please try again.";
+      alert("Upload failed.\n\nDetails: " + (e?.message || e));
+      if (btn) btn.disabled = false;
+    }
+  }
 
-			if (statusEl) statusEl.textContent = "Submitted. Redirecting to Prolific…";
-
-			// Redirect back to Prolific
-			window.location.href = PROLIFIC_COMPLETION_URL;
-		} catch (e) {
-			if (statusEl) statusEl.textContent = "Upload failed. Please try again.";
-			alert("Upload failed. Please check your connection and try again.\n\nDetails: " + (e?.message || e));
-			if (btn) btn.disabled = false;
-		}
-	}
-
-	// Bind the submit button
-	$(document).ready(function () {
-		$("#submitButton").off("click").on("click", function (e) {
-			e.preventDefault();
-			submitAndRedirect();
-		});
-	});
+  $(document).ready(function () {
+    $("#submitButton").off("click").on("click", function (e) {
+      e.preventDefault();
+      submitAndRedirect();
+    });
+  });
 </script>
 <style type="text/css">
 	table,
