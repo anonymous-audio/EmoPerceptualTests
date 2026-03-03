@@ -188,9 +188,23 @@ audio { width: 260px; }
 <script>
 	var reload_audio = function (e) {
 		console.log(e)
-
-
-	// ===================== Prolific + Google Sheets submission wiring =====================
+		//Add in a nocache cheat
+		var src_selector = 'audio[id=' + e + '] > source';
+		$(src_selector)[0].src = $(src_selector)[0].src + "?nocache=" + new Date().getTime()
+		$('audio[id=' + e + ']')[0].load()
+		console.log($('audio[id=' + e + ']')[0].currentSrc)
+	}
+</script>
+<script>
+	var onclick_nocache = function (e) {
+		var currentSrc = $('audio[id=' + e + ']')[0].currentSrc;
+		$('audio[id=' + e + ']')[0].currentSrc = currentSrc + "?nocache=" + new Date().getTime();
+		$('audio[id=' + e + ']>source')[0].src = currentSrc + "?nocache=" + new Date().getTime();
+		$('audio[id=' + e + ']>a')[0].href = currentSrc + "?nocache=" + new Date().getTime();
+	}
+</script>
+<script>
+  // ===================== Prolific + Google Sheets submission wiring =====================
 	// 1) Deploy the companion Google Apps Script as a Web App and paste its URL below.
 	// 2) In Prolific, use an External Study Link that appends PROLIFIC_PID / STUDY_ID / SESSION_ID.
 	// 3) Paste your Prolific completion redirect URL below.
@@ -323,21 +337,6 @@ audio { width: 260px; }
 			submitAndRedirect();
 		});
 	});
-
-		//Add in a nocache cheat
-		var src_selector = 'audio[id=' + e + '] > source';
-		$(src_selector)[0].src = $(src_selector)[0].src + "?nocache=" + new Date().getTime()
-		$('audio[id=' + e + ']')[0].load()
-		console.log($('audio[id=' + e + ']')[0].currentSrc)
-	}
-</script>
-<script>
-	var onclick_nocache = function (e) {
-		var currentSrc = $('audio[id=' + e + ']')[0].currentSrc;
-		$('audio[id=' + e + ']')[0].currentSrc = currentSrc + "?nocache=" + new Date().getTime();
-		$('audio[id=' + e + ']>source')[0].src = currentSrc + "?nocache=" + new Date().getTime();
-		$('audio[id=' + e + ']>a')[0].href = currentSrc + "?nocache=" + new Date().getTime();
-	}
 </script>
 <style type="text/css">
 	table,
