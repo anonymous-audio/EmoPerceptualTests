@@ -169,7 +169,7 @@ audio { width: 260px; }
 		var unfilled = n_ckd.filter(function (x) { return !ckd.includes(x) });
 
 		if (unfilled.length > 0) {
-			alert("You have not rated your confidence for one or more of the questions.\nThe first one missing an answer is: " + unfilled[0].substring(5, 8));
+			alert("You have not rated your confidence for one or more of the questions.");
 			var any_unfilled = true;
 		}
 		else {
@@ -179,7 +179,7 @@ audio { width: 260px; }
 		var unselected = $('select.overall').toArray().filter(function (x) { return x.value == 0 })
 
 		if (unselected.length > 0) {
-			alert("You have not rated 'Same or different?' for one or more of the questions.\nThe first one missing an answer is: " + unselected[0].name.substring(5, 8))
+			alert("You have not choosen 'Clip A or B' for one or more of the questions.")
 		}
 
 		return !any_unfilled && !(unselected.length)
